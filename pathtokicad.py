@@ -2,6 +2,17 @@
 
 import sys, math
 
+
+FRONT_MASK   = "23"
+FRONT_SILK   = "21"
+FRONT_COPPER = "15"
+
+BACK_MASK    = "22"
+BACK_SILK    = "20"
+BACK_COPPER  = "0"
+
+EDGES        = "28"
+
 start = cur = None
 
 cubic_sections = 32
