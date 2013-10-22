@@ -142,6 +142,9 @@ def print_segments(polygon, layer, width):
 	for from_, to in zip(polygon[:-1], polygon[1:]):
 		print "DS %s %s %d %s" % (coord_fmt(from_), coord_fmt(to),width*scale,layer)
 
+def print_zone(polygon, layer, label):
+	print ' 0\n'.join("ZCorner " + coord_fmt(point) for point in polygon) + ' 1'
+
 def print_module(name, fill_paths, segment_paths, pads):
 
 	print """PCBNEW-LibModule-V1
@@ -173,4 +176,21 @@ Li """ + name
 
 	print """$EndMODULE """ + name + """
 $EndLIBRARY"""
+
+def print_zones(zone_paths):
+
+	for layer, label, filename in zone_paths:
+		print """$CZONE_OUTLINE
+ZInfo 525A79DA 1 """+'"'+label+'"'+"""
+ZLayer """+layer+"""
+ZAux 4 E
+ZClearance 200 T
+ZMinThickness 100
+ZOptions 0 16 F 200 200
+ZSmoothing 0 0"""
+		with open(filename) as f:
+			polygons = path_to_polygons(f.read(1000000))
+		for p in polygons:
+			print_zone(p, layer, label)
+		print """$endCZONE_OUTLINE"""
 
