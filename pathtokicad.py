@@ -112,26 +112,27 @@ def path_to_polygons(data):
 
 def coord_fmt( coords ):
 	x, y = coords
-	return "%d %d" % ( round(x*scale), round(y*scale) )
+	return "%d %d" % (x, y)
 
-def pad_at(coords):
-	return """$PAD
+def rescale_point(p, scale, conv=lambda x: x):
+	x, y = p
+	return ( conv(x*scale), conv(y*scale) )
+
+def rescale_polygon(polygon, scale, conv=lambda x: x):
+	return [ rescale_point(p, scale, conv) for p in polygon ]
+
+def pad_grid(coords, w, h, pitch):
+	x, y = coords
+	return [ (x+pitch*i, y+pitch*j) for i in xrange(w) for j in xrange(h) ]
+
+def print_pad(coords):
+	print """$PAD
 Sh "1" C 600 600 0 0 0
 Dr 400 0 0
 At STD N 00E0FFFF
 Ne 0 ""
 Po """+coord_fmt(coords)+"""
 $EndPAD"""
-
-def pad_grid(coords, w, h, pitch=.1):
-	x, y = coords
-	v = []
-	for i in xrange(w):
-		for j in xrange(h):
-			v += [ pad_at( (x + pitch*in_dpi*i, y + pitch*in_dpi*j) ) ]
-
-	return '\n'.join(v)
-	
 
 def print_polygon(polygon, layer):
 	print 'DP 0 0 0 0 %d 1 %s' % (len(polygon), layer)
@@ -140,7 +141,7 @@ def print_polygon(polygon, layer):
 
 def print_segments(polygon, layer, width):
 	for from_, to in zip(polygon[:-1], polygon[1:]):
-		print "DS %s %s %d %s" % (coord_fmt(from_), coord_fmt(to),width*scale,layer)
+		print "DS %s %s %d %s" % (coord_fmt(from_), coord_fmt(to),width,layer)
 
 def print_zone(polygon, layer, label):
 	print ' 0\n'.join("ZCorner " + coord_fmt(point) for point in polygon) + ' 1'
@@ -162,17 +163,19 @@ Li """ + name
 			polygons = path_to_polygons(f.read(1000000))
 
 		for p in polygons:
-			print_polygon(p, layer)
+			print_polygon(rescale_polygon(p, scale, round), layer)
 
 	for layer, filename, width in segment_paths:
 		with open(filename) as f:
 			polygons = path_to_polygons(f.read(1000000))
 
 		for p in polygons:
-			print_segments(p, layer, width)
+			print_segments(rescale_polygon(p, scale, round), layer, width*scale)
 
-	for topleft, w, h in pads:
-		print pad_grid(topleft, w, h)
+	for topleft, w, h, pitch in pads:
+		pads = pad_grid(topleft, w, h, pitch)
+		for pad in pads:
+			print_pad(rescale_point(pad, scale, round))
 
 	print """$EndMODULE """ + name + """
 $EndLIBRARY"""
@@ -191,6 +194,6 @@ ZSmoothing 0 0"""
 		with open(filename) as f:
 			polygons = path_to_polygons(f.read(1000000))
 		for p in polygons:
-			print_zone(p, layer, label)
+			print_zone(rescale_polygon(p, scale, round), layer, label)
 		print """$endCZONE_OUTLINE"""
 

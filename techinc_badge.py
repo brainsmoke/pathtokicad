@@ -25,7 +25,7 @@ segment_paths = [
 ]
 
 pads = [
-	( (-129.50091,49.85), 2, 3 )
+	( (-129.50091,49.85), 2, 3, .1*90 )
 ]
 
 print_module("techinc_badge", fill_paths, segment_paths, pads)
