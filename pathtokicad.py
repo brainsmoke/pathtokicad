@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import sys, math
+import sys, math, itertools
 
 FRONT_MASK   = "23"
 FRONT_SILK   = "21"
@@ -17,10 +17,34 @@ cubic_sections = 32
 in_dpi, out_dpi = 90., 10000.
 scale = out_dpi/in_dpi
 
+def roundint(x):
+	return int(round(x))
+
 def dist(a, b):
 	ax, ay = a
 	bx, by = b
 	return math.sqrt((ax-bx)**2 + (ay-by)**2)
+
+def cross_product(a, b, c):
+	ax, ay = a
+	bx, by = b
+	cx, cy = c
+	return (bx-ax) * (cy-ay) - (by-ay) * (cx-ax)
+
+def counter_clockwise(a, b, c):
+	z = cross_product(a, b, c)
+	if z > 0:
+		return 1
+	elif z < 0:
+		return -1
+	else:
+		return 0
+
+def intersect(l1, l2):
+	a, b = l1
+	c, d = l2
+	return ( counter_clockwise(a,c,d) != counter_clockwise(b,c,d) and 
+	         counter_clockwise(a,b,c) != counter_clockwise(a,b,d) )
 
 def interpolate(pos1, pos2, d):
 	x1, y1 = pos1
@@ -29,6 +53,9 @@ def interpolate(pos1, pos2, d):
 
 def vector_add(a, b):
 	return tuple( i+j for i, j in zip(a,b) )
+
+def vector_sub(a, b):
+	return tuple( i-j for i, j in zip(a,b) )
 
 def cubic_spline( start, guide1, guide2, end ):
 	n = min(int(dist(start, end)*scale/40.)+1, cubic_sections)
@@ -48,6 +75,116 @@ def cubic_spline( start, guide1, guide2, end ):
 
 def get_coords(s):
 	return map(float, s)
+
+def quadrant(p):
+	px,py = p
+	if py < 0:
+		return int(px>0)
+	else:
+		return 3-int(px>0)
+
+def polygon_rotations(poly, center):
+	r = 0
+	x, y = vector_sub(poly[0], center)
+	q = quadrant( (x, y) )
+	for p in poly[1:]:
+		lastx, lasty = x, y
+		lastq = q
+
+		x, y = vector_sub(p, center)
+		q = quadrant( (x, y) )
+
+		if x|y == 0:
+			return 0
+		elif q == lastq:
+			pass
+		elif q == (lastq+1)%4:
+			r += 1
+		elif q == (lastq+3)%4:
+			r -= 1
+		elif (lastx*y < x*lasty) == (y*lasty > 0):
+			r += 2
+		else:
+			r -= 2
+	if not -1 <= r % 4 <= 1:
+		print >> sys.stderr , "MEH r="+str(r), [poly]
+		sys.exit(1)
+	return r//4
+
+def debugpath(p):
+	return "M "+ " ".join(str(x/scale) + ' '+ str(y/scale) for x, y in p) +" Z "
+
+def remove_subsubsets(subsets):
+	sets = subsets.keys()
+	for s_a in sets:
+		for s_b in sets:
+			for s_c in sets:
+				if s_a in subsets[s_b] and s_b in subsets[s_c] and s_a in subsets[s_c]:
+					subsets[s_c].remove(s_a)
+
+def nest_depth(parentset, key):
+	if parentset[key] == []:
+		return 0
+	else:
+		return 1+nest_depth(parentset, parentset[key][0])
+
+def get_cutout_mapping(polygon_list):
+	parents = dict( (n,[]) for n in xrange(len(polygon_list)) )
+	children = dict( (n,[]) for n in xrange(len(polygon_list)) )
+	for a, p_a, in enumerate(polygon_list):
+		for b, p_b, in enumerate(polygon_list):
+			if a != b:
+				r = polygon_rotations(p_b, p_a[0])
+				if r == -1:
+					p_b.reverse() 
+				if r != 0:
+					parents[a].append(b)
+					children[b].append(a)
+
+	remove_subsubsets(parents)
+	remove_subsubsets(children)
+
+	for p in children.keys():
+		if nest_depth(parents, p) & 1 == 1:
+			del children[p]
+
+	return children
+
+def close_polygons(polygons):
+	for polygon in polygons:
+		if tuple(polygon[0]) != tuple(polygon[-1]):
+			polygon.append(polygon[0])
+	return polygons
+
+def weakly_simplefy_polygon(polygon, cutouts):
+	for c in cutouts:
+		c.reverse()
+	while len(cutouts) > 0:
+		distlist = [ (dist(pp, cp), pn, cn, c) for pn,pp in enumerate(polygon[:-1]) for c in cutouts for cn,cp in enumerate(c[:-1]) ]
+		distlist.sort(cmp=lambda a, b: int(a[0]-b[0]))
+		print >> sys.stderr, len(distlist)
+		for _, pn, cn, c in distlist:
+			line1 = (polygon[pn], c[cn])
+
+			for line2 in itertools.chain( zip(p[:-1], p[1:]) for p in [polygon]+cutouts ):
+				if polygon[pn] not in line1 and intersect(line1, line2):
+					break
+			else:
+				print >> sys.stderr, polygon[pn], c[cn], _
+				polygon[pn:pn] = [polygon[pn]] + c[cn:-1] + c[:cn+1] 
+				cutouts.remove(c)
+				break
+	return polygon
+
+def weakly_simplefy(polygons):
+	polygons = close_polygons(polygons)
+	# slow
+	mapping = get_cutout_mapping(polygons)
+	mapping_keys = mapping.keys()
+	mapping_keys.sort()
+	print >> sys.stderr, mapping
+	# slow as hell
+	return [ weakly_simplefy_polygon(polygons[num], [polygons[x] for x in mapping[num]]) for num in mapping_keys ]
 
 def path_to_polygons(data):
 
@@ -121,6 +258,9 @@ def rescale_point(p, scale, conv=lambda x: x):
 def rescale_polygon(polygon, scale, conv=lambda x: x):
 	return [ rescale_point(p, scale, conv) for p in polygon ]
 
+def rescale_polygon_list(polygon_list, scale, conv=lambda x: x):
+	return [ rescale_polygon(polygon, scale, conv) for polygon in polygon_list ]
+
 def pad_grid(coords, w, h, pitch):
 	x, y = coords
 	return [ (x+pitch*i, y+pitch*j) for i in xrange(w) for j in xrange(h) ]
@@ -159,23 +299,29 @@ Po 0 0 0 15 00000000 00000000 ~~
 Li """ + name
 
 	for layer, filename in fill_paths:
+		print >> sys.stderr , filename
 		with open(filename) as f:
 			polygons = path_to_polygons(f.read(1000000))
 
+		polygons = rescale_polygon_list(polygons, scale, roundint)
+		polygons = weakly_simplefy(polygons)
+
 		for p in polygons:
-			print_polygon(rescale_polygon(p, scale, round), layer)
+			print_polygon(p, layer)
 
 	for layer, filename, width in segment_paths:
 		with open(filename) as f:
 			polygons = path_to_polygons(f.read(1000000))
 
+		polygons = rescale_polygon_list(polygons, scale, roundint)
+
 		for p in polygons:
-			print_segments(rescale_polygon(p, scale, round), layer, width*scale)
+			print_segments(p, layer, width*scale)
 
 	for topleft, w, h, pitch in pads:
 		pads = pad_grid(topleft, w, h, pitch)
 		for pad in pads:
-			print_pad(rescale_point(pad, scale, round))
+			print_pad(rescale_point(pad, scale, roundint))
 
 	print """$EndMODULE """ + name + """
 $EndLIBRARY"""
@@ -193,7 +339,11 @@ ZOptions 0 16 F 200 200
 ZSmoothing 0 0"""
 		with open(filename) as f:
 			polygons = path_to_polygons(f.read(1000000))
+
+		polygons = rescale_polygon_list(polygons, scale, roundint)
+		polygons = weakly_simplefy(polygons)
+
 		for p in polygons:
-			print_zone(rescale_polygon(p, scale, round), layer, label)
+			print_zone(p, layer, label)
 		print """$endCZONE_OUTLINE"""
 
