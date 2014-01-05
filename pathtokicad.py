@@ -111,6 +111,14 @@ def polygon_rotations(poly, center):
 		sys.exit(1)
 	return r//4
 
+def polygon_crossproduct_sum(poly):
+	total = 0
+	a = poly[0]
+	for i in range(len(poly)-2):
+		b,c = poly[i+1:i+3]
+		total += cross_product(a, b, c)
+	return total
+
 def debugpath(p):
 	return "M "+ " ".join(str(x/scale) + ' '+ str(y/scale) for x, y in p) +" Z "
 
@@ -131,15 +139,26 @@ def nest_depth(parentset, key):
 def get_cutout_mapping(polygon_list):
 	parents = dict( (n,[]) for n in xrange(len(polygon_list)) )
 	children = dict( (n,[]) for n in xrange(len(polygon_list)) )
+	bboxes = [ ( min(x for x,y in p),
+	             min(y for x,y in p),
+	             max(x for x,y in p),
+	             max(y for x,y in p) ) for p in polygon_list ]
+
 	for a, p_a, in enumerate(polygon_list):
 		for b, p_b, in enumerate(polygon_list):
 			if a != b:
-				r = polygon_rotations(p_b, p_a[0])
-				if r == -1:
-					p_b.reverse() 
-				if r != 0:
-					parents[a].append(b)
-					children[b].append(a)
+				min_ax, min_ay, max_ax, max_ay = bboxes[a]
+				min_bx, min_by, max_bx, max_by = bboxes[b]
+				if ( min_bx <= min_ax <= max_ax <= max_bx and
+				     min_by <= min_ay <= max_ay <= max_by ):
+
+					r = polygon_rotations(p_b, p_a[0])
+					if r == 1:
+						print >> sys.stderr, "orientation weird"
+						sys.exit(1)
+					if r != 0:
+						parents[a].append(b)
+						children[b].append(a)
 
 	remove_subsubsets(parents)
 	remove_subsubsets(children)
@@ -154,6 +173,12 @@ def close_polygons(polygons):
 	for polygon in polygons:
 		if tuple(polygon[0]) != tuple(polygon[-1]):
 			polygon.append(polygon[0])
+	return polygons
+
+def counter_clockwise(polygons):
+	for polygon in polygons:
+		if polygon_crossproduct_sum(polygon) > 0:
+			polygon.reverse()
 	return polygons
 
 def weakly_simplefy_polygon(polygon, cutouts):
@@ -178,6 +203,7 @@ def weakly_simplefy_polygon(polygon, cutouts):
 
 def weakly_simplefy(polygons):
 	polygons = close_polygons(polygons)
+	polygons = counter_clockwise(polygons)
 	# slow
 	mapping = get_cutout_mapping(polygons)
 	mapping_keys = mapping.keys()
