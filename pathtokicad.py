@@ -16,6 +16,7 @@ cubic_sections = 32
 
 in_dpi, out_dpi = 90., 10000.
 scale = out_dpi/in_dpi
+new_scale = 25400/in_dpi
 
 def roundint(x):
 	return int(round(x))
@@ -277,6 +278,10 @@ def coord_fmt( coords ):
 	x, y = coords
 	return "%d %d" % (x, y)
 
+def coord_fmt_new( coords ):
+	x, y = coords
+	return "(xy %.3f %.3f) " % (x/1000., y/1000.)
+
 def rescale_point(p, scale, conv=lambda x: x):
 	x, y = p
 	return ( conv(x*scale), conv(y*scale) )
@@ -291,10 +296,10 @@ def pad_grid(coords, w, h, pitch):
 	x, y = coords
 	return [ (x+pitch*i, y+pitch*j) for i in xrange(w) for j in xrange(h) ]
 
-def print_pad(coords):
+def print_pad(coords, size):
 	print """$PAD
-Sh "1" C 600 600 0 0 0
-Dr 400 0 0
+Sh "1" C """+str(int(size)+200)+""" """+str(int(size)+200)+""" 0 0 0
+Dr """+str(int(size))+""" 0 0
 At STD N 00E0FFFF
 Ne 0 ""
 Po """+coord_fmt(coords)+"""
@@ -311,6 +316,9 @@ def print_segments(polygon, layer, width):
 
 def print_zone(polygon, layer, label):
 	print ' 0\n'.join("ZCorner " + coord_fmt(point) for point in polygon) + ' 1'
+
+def print_zone_new(polygon):
+	print '\n'.join(coord_fmt_new(point) for point in polygon)
 
 def print_module(name, fill_paths, segment_paths, pads):
 
@@ -344,10 +352,10 @@ Li """ + name
 		for p in polygons:
 			print_segments(p, layer, width*scale)
 
-	for topleft, w, h, pitch in pads:
+	for topleft, w, h, pitch, size in pads:
 		pads = pad_grid(topleft, w, h, pitch)
 		for pad in pads:
-			print_pad(rescale_point(pad, scale, roundint))
+			print_pad(rescale_point(pad, scale, roundint), size)
 
 	print """$EndMODULE """ + name + """
 $EndLIBRARY"""
@@ -372,4 +380,16 @@ ZSmoothing 0 0"""
 		for p in polygons:
 			print_zone(p, layer, label)
 		print """$endCZONE_OUTLINE"""
+
+def print_zones_new(zone_paths):
+
+	for layer, label, filename in zone_paths:
+		with open(filename) as f:
+			polygons = path_to_polygons(f.read(1000000))
+
+		polygons = rescale_polygon_list(polygons, new_scale, roundint)
+		polygons = weakly_simplefy(polygons)
+
+		for p in polygons:
+			print_zone_new(p)
 
